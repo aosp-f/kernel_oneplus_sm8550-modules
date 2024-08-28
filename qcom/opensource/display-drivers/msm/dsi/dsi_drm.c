@@ -25,6 +25,10 @@
 #include "../oplus/oplus_adfr.h"
 #endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 
+#ifdef OPLUS_FEATURE_DISPLAY
+#include "../oplus/oplus_display_panel_feature.h"
+#endif
+
 #define to_dsi_bridge(x)     container_of((x), struct dsi_bridge, base)
 #define to_dsi_state(x)      container_of((x), struct dsi_connector_state, base)
 
@@ -204,6 +208,11 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	if (bridge->encoder->crtc->state->active_changed)
 		atomic_set(&c_bridge->display->panel->esd_recovery_pending, 0);
 
+#ifdef OPLUS_FEATURE_DISPLAY
+	mutex_lock(&c_bridge->display->display_lock);
+	oplus_panel_switch_vid_mode(c_bridge->display, &(c_bridge->dsi_mode));
+	mutex_unlock(&c_bridge->display->display_lock);
+#endif
 	/* By this point mode should have been validated through mode_fixup */
 	rc = dsi_display_set_mode(c_bridge->display,
 			&(c_bridge->dsi_mode), 0x0);
@@ -719,7 +728,7 @@ int dsi_conn_get_mode_info(struct drm_connector *connector,
 	if (mode_info->comp_info.comp_type) {
 		tar_bpp = dsi_mode->priv_info->pclk_scale.numer;
 		src_bpp = dsi_mode->priv_info->pclk_scale.denom;
-		mode_info->comp_info.comp_ratio = mult_frac(100, src_bpp,
+		mode_info->comp_info.comp_ratio = mult_frac(1, src_bpp,
 				tar_bpp);
 		mode_info->wide_bus_en = dsi_mode->priv_info->widebus_support;
 	}

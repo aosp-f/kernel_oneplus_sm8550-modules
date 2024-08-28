@@ -206,6 +206,8 @@ struct dsi_panel_oplus_privite {
 	bool pwm_switch_restore_support;
 	bool need_sync;
 	u32 disable_delay_bl_count;
+	bool gamma_switch_enable;
+	bool vid_timming_switch_enabled;
 };
 
 struct dsi_panel_oplus_serial_number {
@@ -215,6 +217,8 @@ struct dsi_panel_oplus_serial_number {
 	u32 serial_number_reg;
 	int serial_number_index;
 	int serial_number_conut;
+	bool is_multi_reg;
+	u32 *serial_number_multi_regs;
 };
 #endif /* OPLUS_FEATURE_DISPLAY */
 

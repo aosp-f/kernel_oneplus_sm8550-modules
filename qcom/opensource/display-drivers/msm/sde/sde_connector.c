@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -126,7 +126,7 @@ static const struct drm_prop_enum_list e_panel_mode[] = {
 };
 
 #if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS)
-extern int iris_backlight_update;
+extern iris_backlight_update;
 #endif
 
 static void sde_dimming_bl_notify(struct sde_connector *conn, struct dsi_backlight_config *config)
@@ -1354,7 +1354,6 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector)
 	struct sde_connector *c_conn = NULL;
 	struct dsi_display *display;
 	struct sde_kms *sde_kms;
-	struct drm_crtc *crtc;
 
 	sde_kms = sde_connector_get_kms(connector);
 	if (!sde_kms) {
@@ -1364,17 +1363,15 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector)
 
 	c_conn = to_sde_connector(connector);
 	display = (struct dsi_display *) c_conn->display;
-	crtc = connector->state->crtc;
 
 	/*
 	 * Special handling for some panels which need atleast
 	 * one frame to be transferred to GRAM before enabling backlight.
 	 * So delay backlight update to these panels until the
-	 * first frame commit is received from the HW only during power on.
+	 * first frame commit is received from the HW.
 	 */
-	if ((display->panel->bl_config.bl_update ==
-		BL_UPDATE_DELAY_UNTIL_FIRST_FRAME) &&
-		crtc && crtc->state->active_changed)
+	if (display->panel->bl_config.bl_update ==
+				BL_UPDATE_DELAY_UNTIL_FIRST_FRAME)
 		sde_encoder_wait_for_event(c_conn->encoder,
 				MSM_ENC_TX_COMPLETE);
 	c_conn->allow_bl_update = true;

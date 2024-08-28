@@ -129,7 +129,18 @@ bool oplus_panel_validate_reg_read(struct dsi_panel *panel)
 	cnt += scnprintf(payload + cnt, sizeof(payload) - cnt, "ESD:");
 	for (i = 0; i < len; ++i)
 		cnt += scnprintf(payload + cnt, sizeof(payload) - cnt, " [0x%02X]", config->return_buf[i]);
+	DSI_MM_ERR("ESD check failed:%s\n", payload);
 
 	return false;
 }
 
+void oplus_panel_esd_set_page(struct dsi_panel *panel, int cmd_index)
+{
+	if(!strcmp(panel->name, "AC147 P 7 A0012 dsc cmd mode panel")) {
+		if (cmd_index == 0) {
+			dsi_panel_tx_cmd_set(panel, DSI_CMD_DEFAULT_SWITCH_PAGE);
+		} else if (cmd_index == 1) {
+			dsi_panel_tx_cmd_set(panel, DSI_CMD_ESD_SWITCH_PAGE);
+		}
+	}
+}

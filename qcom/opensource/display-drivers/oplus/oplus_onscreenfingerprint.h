@@ -65,7 +65,7 @@ struct oplus_ofp_params {
 													 bit(5):pressed icon brightness adaptation
 													 bit(6):ultrasonic fingerprint
 													 bit(7):ultra low power aod
-													 bit(8):fod color feature flag
+													 bit(9):video mode aod && fod
 													*/
 	bool fp_type_compatible_mode;					/* indicates whether fp type compatible mode is set or not */
 	bool need_to_bypass_gamut;						/* indicates whether gamut needs to be bypassed in aod/fod scenarios or not */
@@ -80,10 +80,6 @@ struct oplus_ofp_params {
 	bool fp_press;									/* indicates whether pressed icon layer is ready or not */
 	unsigned int pressed_icon_status;				/* indicates whether pressed icon has been displayed in panel module or not */
 	unsigned int notifier_chain_value;				/* ui ready notifier chain value */
-	unsigned int lhbm_dbv_alpha_cmd_index;			/* indicates which line the dbv alpha register is in the cmd set */
-	unsigned int lhbm_dbv_alpha_register_offset;	/* indicates where the dbv alpha register is in the line instruction */
-	unsigned int lhbm_dbv_alpha_value_count;		/* the count of lhbm dbv alpha value */
-	unsigned int *lhbm_dbv_alpha_value;				/* the lhbm dbv alpha value which represents the alpha register setting corresponding to the backlight level */
 	struct workqueue_struct *uiready_event_wq;		/* a workqueue used to send uiready event */
 	struct work_struct uiready_event_work;			/* a work struct used to send uiready event */
 	/* aod */
@@ -168,6 +164,7 @@ bool oplus_ofp_optical_new_solution_is_enabled(void);
 bool oplus_ofp_local_hbm_is_enabled(void);
 bool oplus_ofp_ultrasonic_is_enabled(void);
 bool oplus_ofp_ultra_low_power_aod_is_enabled(void);
+bool oplus_ofp_video_mode_aod_fod_is_enabled(void);
 bool oplus_ofp_get_hbm_state(void);
 bool oplus_ofp_get_ultra_low_power_aod_state(void);
 int oplus_ofp_property_update(void *sde_connector, void *sde_connector_state, int prop_id, uint64_t prop_val);
@@ -176,7 +173,6 @@ int oplus_ofp_property_update(void *sde_connector, void *sde_connector_state, in
 int oplus_ofp_parse_dtsi_config(void *dsi_display_mode, void *dsi_parser_utils);
 int oplus_ofp_lhbm_pressed_icon_gamma_update(void *dsi_display);
 int oplus_ofp_lhbm_backlight_update(void *sde_encoder_virt, void *dsi_panel, unsigned int *bl_level);
-int oplus_ofp_lhbm_dbv_alpha_update(void *dsi_panel, unsigned int bl_level, bool mutex_lock);
 int oplus_ofp_send_hbm_state_event(unsigned int hbm_state);
 int oplus_ofp_hbm_handle(void *sde_encoder_virt);
 int oplus_ofp_cmd_post_wait(void *dsi_display_mode, void *dsi_cmd_desc, enum dsi_cmd_set_type type);
@@ -194,6 +190,7 @@ void oplus_ofp_aod_display_on_set_work_handler(struct work_struct *work_item);
 int oplus_ofp_aod_display_on_set(void *sde_encoder_phys);
 int oplus_ofp_aod_off_handle(void *dsi_display);
 int oplus_ofp_power_mode_handle(void *dsi_display, int power_mode);
+int oplus_ofp_video_mode_aod_handle(void *dsi_display, void *dsi_display_mode);
 void oplus_ofp_aod_off_set_work_handler(struct work_struct *work_item);
 int oplus_ofp_touchpanel_event_notifier_call(struct notifier_block *nb, unsigned long action, void *data);
 int oplus_ofp_aod_off_hbm_on_delay_check(void *sde_encoder_phys);

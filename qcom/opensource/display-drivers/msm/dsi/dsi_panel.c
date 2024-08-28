@@ -463,7 +463,8 @@ static int dsi_panel_power_on(struct dsi_panel *panel)
 	if (!strcmp(panel->name, "AC052 P 3 A0003 dsc cmd mode panel")
 		|| !strcmp(panel->name, "AC052 S 3 A0001 dsc cmd mode panel")
 		|| !strcmp(panel->name, "AA536 P 3 A0001 dsc cmd mode panel")
-		|| !strcmp(panel->oplus_priv.vendor_name, "A0004")) {
+		|| !strcmp(panel->oplus_priv.vendor_name, "A0004")
+		|| !strcmp(panel->oplus_priv.vendor_name, "A0012")) {
 		rc = 0;
 	} else {
 			if (panel->oplus_priv.oplus_disp_hw_seq_modify_flag) {
@@ -2162,7 +2163,6 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-lhbm-pressed-icon-grayscale-command",
 	"qcom,mdss-dsi-lhbm-pressed-icon-on-command",
 	"qcom,mdss-dsi-lhbm-pressed-icon-off-command",
-	"qcom,mdss-dsi-lhbm-dbv-alpha-command",
 	"qcom,mdss-dsi-aor-on-command",
 	"qcom,mdss-dsi-aor-off-command",
 	"qcom,mdss-dsi-aod-high-mode-command",
@@ -2236,6 +2236,8 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-panel-info-switch-page-command",
 	"qcom,mdss-dsi-panel-init-command",
 	"qcom,mdss-dsi-pwm-turbo-on-command",
+	"qcom,mdss-dsi-vid-120hz-switch-command",
+	"qcom,mdss-dsi-vid-60hz-switch-command",
 	"qcom,mdss-dsi-pwm-turbo-off-command",
 	"qcom,mdss-dsi-pwm-turbo-hbm-on-command",
 	"qcom,mdss-dsi-pwm-turbo-hbm-off-command",
@@ -2256,6 +2258,12 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-gamma-pre-read-off-command",
 	"qcom,mdss-dsi-gamma-remap-command",
 	"qcom,mdss-dsi-on-demura-command",
+	"qcom,mdss-dsi-cabc-mode1-command",
+	"qcom,mdss-dsi-cabc-mode2-command",
+	"qcom,mdss-dsi-cabc-mode3-command",
+	"qcom,mdss-dsi-switch-to-page0-command",
+	"qcom,mdss-dsi-backlight-gamma-enter-command",
+	"qcom,mdss-dsi-backlight-gamma-exit-command",
 #endif /* OPLUS_FEATURE_DISPLAY */
 #if defined(CONFIG_PXLW_IRIS)
 	"qcom,mdss-dsi-iris-switch-tsp-vsync-scanline-command",
@@ -2350,7 +2358,6 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-lhbm-pressed-icon-grayscale-command-state",
 	"qcom,mdss-dsi-lhbm-pressed-icon-on-command-state",
 	"qcom,mdss-dsi-lhbm-pressed-icon-off-command-state",
-	"qcom,mdss-dsi-lhbm-dbv-alpha-command-state",
 	"qcom,mdss-dsi-aor-on-command-state",
 	"qcom,mdss-dsi-aor-off-command-state",
 	"qcom,mdss-dsi-aod-high-mode-command-state",
@@ -2422,6 +2429,8 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-esd-switch-page-command-state",
 	"qcom,dsi-panel-date-switch-command-state",
 	"qcom,mdss-dsi-panel-info-switch-page-command-state",
+	"qcom,mdss-dsi-vid-120hz-switch-command-state",
+	"qcom,mdss-dsi-vid-60hz-switch-command-state",
 	"qcom,mdss-dsi-panel-init-command-state",
 	"qcom,mdss-dsi-pwm-turbo-on-command-state",
 	"qcom,mdss-dsi-pwm-turbo-off-command-state",
@@ -2444,6 +2453,12 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-gamma-pre-read-off-command-state",
 	"qcom,mdss-dsi-gamma-remap-command-state",
 	"qcom,mdss-dsi-on-demura-command-state",
+	"qcom,mdss-dsi-cabc-mode1-command-state",
+	"qcom,mdss-dsi-cabc-mode2-command-state",
+	"qcom,mdss-dsi-cabc-mode3-command-state",
+	"qcom,mdss-dsi-switch-to-page0-command-state",
+	"qcom,mdss-dsi-backlight-gamma-enter-command-state",
+	"qcom,mdss-dsi-backlight-gamma-exit-command-state",
 #endif /* OPLUS_FEATURE_DISPLAY */
 #if defined(CONFIG_PXLW_IRIS)
 	"qcom,mdss-dsi-iris-switch-tsp-vsync-scanline-command-state",
@@ -3170,7 +3185,7 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 	}
 #endif /* OPLUS_FEATURE_DISPLAY */
 
-	state = utils->get_property(utils->data, "qcom,bl-dcs-cmd-state", NULL);
+	state = utils->get_property(utils->data, "qcom,bl-dsc-cmd-state", NULL);
 	if (!state || !strcmp(state, "dsi_hs_mode"))
 		panel->bl_config.lp_mode = false;
 	else if (!strcmp(state, "dsi_lp_mode"))
@@ -3417,8 +3432,7 @@ static int dsi_panel_parse_dsc_params(struct dsi_display_mode *mode,
 		goto error;
 	}
 
-	rc = sde_dsc_populate_dsc_private_params(&priv_info->dsc, intf_width,
-			priv_info->widebus_support);
+	rc = sde_dsc_populate_dsc_private_params(&priv_info->dsc, intf_width);
 	if (rc) {
 		DSI_DEBUG("failed populating other dsc params\n");
 		rc = -EINVAL;
@@ -4826,6 +4840,12 @@ int dsi_panel_get_mode(struct dsi_panel *panel,
 	mutex_lock(&panel->panel_lock);
 	utils = &panel->utils;
 
+	mode->priv_info = kzalloc(sizeof(*mode->priv_info), GFP_KERNEL);
+	if (!mode->priv_info) {
+		rc = -ENOMEM;
+		goto done;
+	}
+
 	prv_info = mode->priv_info;
 
 	timings_np = utils->get_child_by_name(utils->data,
@@ -4943,8 +4963,12 @@ int dsi_panel_get_mode(struct dsi_panel *panel,
 		}
 #endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 	}
+	goto done;
 
 parse_fail:
+	kfree(mode->priv_info);
+	mode->priv_info = NULL;
+done:
 	utils->data = utils_data;
 	mutex_unlock(&panel->panel_lock);
 	return rc;
@@ -5207,7 +5231,8 @@ int dsi_panel_prepare(struct dsi_panel *panel)
 	if (!strcmp(panel->name, "AC052 P 3 A0003 dsc cmd mode panel")
 		|| !strcmp(panel->name, "AC052 S 3 A0001 dsc cmd mode panel")
 		|| !strcmp(panel->name, "AA536 P 3 A0001 dsc cmd mode panel")
-		|| !strcmp(panel->oplus_priv.vendor_name, "A0004")) {
+		|| !strcmp(panel->oplus_priv.vendor_name, "A0004")
+		|| !strcmp(panel->oplus_priv.vendor_name, "A0012")) {
 		usleep_range(10*1000, (10*1000)+100);
 		dsi_panel_reset(panel);
 	}
@@ -5487,10 +5512,6 @@ int dsi_panel_switch(struct dsi_panel *panel)
 	int rc = 0;
 #if defined(CONFIG_PXLW_IRIS)
 	enum dsi_cmd_set_type TIMING_SWITCH_TYPE_ID = DSI_CMD_SET_TIMING_SWITCH;
-	if (oplus_panel_pwm_onepulse_is_used(panel) &&
-		!strcmp(panel->name, "AA551 P 3 A0004 dsc cmd mode panel")) {
-		TIMING_SWITCH_TYPE_ID = DSI_CMD_TIMMING_PWM_SWITCH_ONEPULSE;
-	}
 	if (is_project(22811))
 		TIMING_SWITCH_TYPE_ID = DSI_CMD_SET_IRIS_SWITCH_TSP_VSYNC_SCANLINE;
 #endif
@@ -5517,8 +5538,7 @@ int dsi_panel_switch(struct dsi_panel *panel)
 		oplus_wait_for_vsync(panel);
 	}
 	/* set pwm state flag for timing switch will change panel pwm state*/
-	if (oplus_panel_pwm_onepulse_is_enabled(panel)
-		&& panel->oplus_priv.directional_onepulse_switch) {
+	if (oplus_panel_pwm_onepulse_is_enabled(panel)) {
 		if (panel->bl_config.bl_level > panel->bl_config.pwm_bl_threshold)
 			panel->oplus_pwm_switch_state = PWM_SWITCH_ONEPULSE_STATE;
 		else

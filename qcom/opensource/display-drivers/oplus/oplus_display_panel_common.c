@@ -16,7 +16,6 @@
 #include "oplus_display_private_api.h"
 #include "oplus_display_interface.h"
 #include "oplus_bl.h"
-
 #if defined(CONFIG_PXLW_IRIS)
 #include "../msm/iris/common/dsi_iris_loop_back.h"
 #endif
@@ -38,6 +37,7 @@ int oplus_dither_enable = 0;
 int oplus_dre_status = 0;
 int oplus_cabc_status = OPLUS_DISPLAY_CABC_UI;
 extern int lcd_closebl_flag;
+extern int shutdown_flag;
 extern int oplus_display_audio_ready;
 char oplus_rx_reg[PANEL_TX_MAX_BUF] = {0x0};
 char oplus_rx_len = 0;
@@ -689,7 +689,7 @@ int oplus_display_panel_gamma_update(void)
 
 int oplus_display_panel_get_serial_number(void *buf)
 {
-	int ret = 0, i;
+	int ret = 0, i, j;
 	unsigned char read[30] = {0};
 	PANEL_SERIAL_INFO panel_serial_info;
 	uint64_t serial_number;
@@ -773,12 +773,30 @@ int oplus_display_panel_get_serial_number(void *buf)
 			return ret;
 		}
 
+		if (display->panel->oplus_ser.is_multi_reg) {
+			if (display->panel->oplus_ser.serial_number_conut < 7) {
+				LCD_ERR("Get panel sn invalid multi regs\n");
+				return -1;
+			}
+		}
+
 		if (!strcmp(display->panel->name, "AA536 P 3 A0001 dsc cmd mode panel") ||
-			!strcmp(display->panel->name, "AA551 P 3 A0004 dsc cmd mode panel")) {
+			!strcmp(display->panel->name, "AA551 P 3 A0004 dsc cmd mode panel") ||
+			!strcmp(display->panel->name, "AC147 P 7 A0012 dsc cmd mode panel")) {
 			LCD_INFO("skip set_page\n");
 		} else if (!strcmp(display->panel->name, "boe rm692e5 dsc cmd mode panel")) {
 			ret = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_PANEL_DATE_SWITCH);
 			if (ret) {
+				return -1;
+			}
+		} else if (display->panel->oplus_ser.is_switch_page) {
+			mutex_lock(&display->display_lock);
+			mutex_lock(&display->panel->panel_lock);
+			ret = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_PANEL_DATE_SWITCH);
+			mutex_unlock(&display->panel->panel_lock);
+			mutex_unlock(&display->display_lock);
+			if (ret) {
+				LCD_ERR("get serial number switch page failed\n");
 				return -1;
 			}
 		} else if (!display->panel->oplus_ser.is_reg_lock) {
@@ -799,7 +817,7 @@ int oplus_display_panel_get_serial_number(void *buf)
 			mutex_unlock(&display->panel->panel_lock);
 			mutex_unlock(&display->display_lock);
 			if (ret < 0) {
-				ret = scnprintf(buf, PAGE_SIZE, "Get panel serial number failed, reason:%d", ret);
+				LCD_ERR("mipi_dsi_dcs_write failed\n");
 				msleep(20);
 				continue;
 			}
@@ -826,6 +844,37 @@ int oplus_display_panel_get_serial_number(void *buf)
 				read, display->panel->oplus_ser.serial_number_conut);
 			mutex_unlock(&display->panel->panel_lock);
 			mutex_unlock(&display->display_lock);
+		} else if (display->panel->oplus_ser.is_multi_reg) {
+			mutex_lock(&display->display_lock);
+			mutex_lock(&display->panel->panel_lock);
+
+			if (display->panel->oplus_ser.is_switch_page) {
+				ret = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_PANEL_DATE_SWITCH);
+				if (ret) {
+					LCD_ERR("get serial number switch page failed\n");
+					mutex_unlock(&display->panel->panel_lock);
+					mutex_unlock(&display->display_lock);
+					return -1;
+				}
+			}
+
+			for (j = 0; j < display->panel->oplus_ser.serial_number_conut; j++) {
+				ret = dsi_panel_read_panel_reg_unlock(m_ctrl, display->panel, display->panel->oplus_ser.serial_number_multi_regs[j],
+					&read[j], 1);
+				if (ret < 0) {
+					LCD_ERR("read serial number multi regs index = %d failed\n", j);
+					msleep(20);
+					break;
+				}
+			}
+			mutex_unlock(&display->panel->panel_lock);
+			mutex_unlock(&display->display_lock);
+
+			if (ret < 0) {
+				LCD_ERR("read serial number multi regs failed\n");
+				msleep(20);
+				continue;
+			}
 		} else {
 			ret = dsi_display_read_panel_reg(display, display->panel->oplus_ser.serial_number_reg,
 					read, display->panel->oplus_ser.serial_number_conut);
@@ -1636,6 +1685,16 @@ int oplus_display_panel_get_cabc_status(void *buf)
 	}
 	panel = display->panel;
 
+	if (!strcmp(panel->name, "AC166 P 3 A0013 video mode dsi panel")
+		|| !strcmp(panel->name, "AC166 P D A0018 video mode dsi panel")) {
+		rc = oplus_display_panel_get_cabc(buf);
+		return rc;
+	}
+
+	if (!strcmp(panel->name, "AC190 P D A0018 video mode dsi panel") || !strcmp(panel->name, "AC190 P 4 A0013 video mode dsi panel")) {
+		rc = oplus_display_panel_get_cabc(buf);
+		return rc;
+	}
 	mutex_lock(&display->display_lock);
 	mutex_lock(&panel->panel_lock);
 
@@ -1666,6 +1725,17 @@ int oplus_display_panel_set_cabc_status(void *buf)
 		return rc;
 	}
 	panel = display->panel;
+
+	if (!strcmp(panel->name, "AC166 P 3 A0013 video mode dsi panel")
+		|| !strcmp(panel->name, "AC166 P D A0018 video mode dsi panel")) {
+		rc = oplus_display_panel_set_cabc(buf);
+		return rc;
+	}
+
+	if (!strcmp(panel->name, "AC190 P D A0018 video mode dsi panel") || !strcmp(panel->name, "AC190 P 4 A0013 video mode dsi panel")) {
+		rc = oplus_display_panel_set_cabc(buf);
+		return rc;
+	}
 
 	if (!panel->oplus_priv.cabc_enabled) {
 		LCD_WARN("This project don't support cabc\n");
@@ -1948,7 +2018,6 @@ int oplus_panel_update_pwm_pulse_lock(struct dsi_panel *panel, bool enabled)
 	mutex_lock(&panel->panel_lock);
 
 	panel->oplus_priv.pwm_onepulse_enabled = enabled;
-
 	if (!panel->oplus_priv.directional_onepulse_switch) {
 		panel->oplus_pwm_switch_state = !panel->oplus_pwm_switch_state;
 	}
@@ -2113,6 +2182,16 @@ int oplus_display_update_clk_ffc(struct dsi_display *display,
 	struct dsi_panel *panel = display->panel;
 	struct oplus_clk_osc clk_osc_pending;
 
+	DSI_MM_INFO("DisplayDriverID@@426$$Switching ffc mode, clk:[%d -> %d]",
+			display->cached_clk_rate,
+			display->dyn_bit_clk);
+
+	if (display->cached_clk_rate == display->dyn_bit_clk) {
+		DSI_MM_WARN("DisplayDriverID@@427$$Ignore duplicated clk ffc setting, clk=%d",
+				display->dyn_bit_clk);
+		return rc;
+	}
+
 	mutex_lock(&panel->oplus_ffc_lock);
 
 	clk_osc_pending.clk_rate = display->dyn_bit_clk;
@@ -2121,6 +2200,10 @@ int oplus_display_update_clk_ffc(struct dsi_display *display,
 	rc = oplus_panel_check_ffc_config(panel, &clk_osc_pending);
 	if (!rc) {
 		panel->oplus_priv.ffc_delay_frames = FFC_DELAY_MAX_FRAMES;
+	} else {
+		DSI_MM_ERR("DisplayDriverID@@427$$Failed to find ffc mode index, clk=%d, osc=%d",
+				clk_osc_pending.clk_rate,
+				clk_osc_pending.osc_rate);
 	}
 
 	mutex_unlock(&panel->oplus_ffc_lock);
@@ -2135,11 +2218,26 @@ int oplus_display_update_osc_ffc(struct dsi_display *display,
 	struct dsi_panel *panel = display->panel;
 	struct oplus_clk_osc clk_osc_pending;
 
+	DSI_MM_INFO("DisplayDriverID@@428$$Switching ffc mode, osc:[%d -> %d]",
+			panel->oplus_priv.osc_rate_cur,
+			osc_rate);
+
+	if (osc_rate == panel->oplus_priv.osc_rate_cur) {
+		DSI_MM_WARN("DisplayDriverID@@429$$Ignore duplicated osc ffc setting, osc=%d",
+				panel->oplus_priv.osc_rate_cur);
+		return rc;
+	}
+
 	mutex_lock(&panel->oplus_ffc_lock);
 
 	clk_osc_pending.clk_rate = panel->oplus_priv.clk_rate_cur;
 	clk_osc_pending.osc_rate = osc_rate;
 	rc = oplus_panel_check_ffc_config(panel, &clk_osc_pending);
+	if (rc) {
+		DSI_MM_ERR("DisplayDriverID@@429$$Failed to find ffc mode index, clk=%d, osc=%d",
+				clk_osc_pending.clk_rate,
+				clk_osc_pending.osc_rate);
+	}
 
 	mutex_unlock(&panel->oplus_ffc_lock);
 
@@ -2625,11 +2723,6 @@ int oplus_sde_early_wakeup(struct dsi_panel *panel)
 		DSI_ERR("invalid display params\n");
 		return -EINVAL;
 	}
-	/* when SDE_MODE_DPMS_OFF, wake up SDE_ENC_RC may case _sde_encoder_rc_stop error */
-	if (d_display->panel->power_mode == SDE_MODE_DPMS_OFF) {
-		OFP_INFO("[%s]:panel power off\n", __func__);
-		return -EFAULT;
-	}
 	drm_enc = d_display->bridge->base.encoder;
 	if (!drm_enc) {
 		DSI_ERR("invalid encoder params\n");
@@ -2684,7 +2777,7 @@ void oplus_save_last_mode(struct dsi_display *display)
 		return;
 
 	if (display->panel->power_mode != SDE_MODE_DPMS_ON || !display->panel->panel_initialized) {
-		LCD_WARN("display panel in off status\n");
+		LCD_INFO("display panel in off status\n");
 		return;
 	}
 
@@ -2710,7 +2803,7 @@ void oplus_panel_switch_to_sync_te(struct dsi_panel *panel)
 
 
 	if (panel->power_mode != SDE_MODE_DPMS_ON || !panel->panel_initialized) {
-		LCD_WARN("display panel in off status\n");
+		LCD_INFO("display panel in off status\n");
 		return;
 	}
 
@@ -2808,7 +2901,7 @@ void oplus_need_to_sync_te(struct dsi_panel *panel)
 	int delay;
 
 	if (panel->power_mode != SDE_MODE_DPMS_ON || !panel->panel_initialized) {
-		LCD_WARN("display panel in off status\n");
+		LCD_INFO("display panel in off status\n");
 		return;
 	}
 
@@ -2827,7 +2920,7 @@ void oplus_need_to_sync_te(struct dsi_panel *panel)
 	return;
 }
 
-int oplus_display_panel_set_demua(void)
+int oplus_display_panel_set_demua()
 {
 	u32 bl_lvl = 0;
 	int rc = 0;
@@ -3120,4 +3213,13 @@ int oplus_display_panel_get_hbm_max(void *data)
 	LCD_INFO("Get hbm max state: %d\n", *hbm_max_state);
 
 	return rc;
+}
+
+int oplus_display_set_shutdown_flag(void *buf)
+{
+	shutdown_flag = 1;
+	pr_err("debug for %s, buf = [%s], shutdown_flag = %d\n",
+			__func__, buf, shutdown_flag);
+
+	return 0;
 }

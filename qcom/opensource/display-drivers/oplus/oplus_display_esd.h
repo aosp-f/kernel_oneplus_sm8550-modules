@@ -16,6 +16,7 @@
 
 int oplus_panel_parse_esd_reg_read_configs(struct dsi_panel *panel);
 bool oplus_panel_validate_reg_read(struct dsi_panel *panel);
+void oplus_panel_esd_set_page(struct dsi_panel *panel, int cmd_index);
 
 #endif /* _OPLUS_ESD_H_ */
 

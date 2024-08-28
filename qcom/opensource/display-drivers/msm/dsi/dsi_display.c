@@ -327,6 +327,14 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 	DSI_DEBUG("bl_scale = %u, bl_scale_sv = %u, bl_lvl = %u\n",
 		bl_scale, bl_scale_sv, (u32)bl_temp);
 
+#ifdef OPLUS_BUG_STABILITY
+	if (panel->oplus_priv.gamma_switch_enable && !strcmp(panel->name,"AC166 P 3 A0013 video mode dsi panel")) {
+		rc = oplus_display_panel_switch_gamma_mode(panel, bl_lvl);
+		if (rc)
+			DSI_ERR("failed to switch gamma mode\n");
+	}
+#endif /* OPLUS_BUG_STABILITY */
+
 	rc = dsi_panel_set_backlight(panel, (u32)bl_temp);
 	if (rc)
 		DSI_ERR("unable to set backlight\n");
@@ -916,8 +924,11 @@ static int dsi_display_read_status(struct dsi_display_ctrl *ctrl,
 	flags = DSI_CTRL_CMD_READ;
 
 	for (i = 0; i < count; ++i) {
-		memset(config->status_buf, 0x0, SZ_4K);
+#ifdef OPLUS_FEATURE_DISPLAY
+		oplus_panel_esd_set_page(panel, i);
+#endif /* OPLUS_FEATURE_DISPLAY */
 
+		memset(config->status_buf, 0x0, SZ_4K);
 		if (config->status_cmd.state == DSI_CMD_SET_STATE_LP)
 			cmds[i].msg.flags |= MIPI_DSI_MSG_USE_LPM;
 
@@ -961,6 +972,10 @@ static int dsi_display_read_status(struct dsi_display_ctrl *ctrl,
 #if defined(CONFIG_PXLW_IRIS)
 		}
 #endif
+
+#ifdef OPLUS_FEATURE_DISPLAY
+		oplus_panel_esd_set_page(panel, 0);
+#endif /* OPLUS_FEATURE_DISPLAY */
 	}
 
 #if defined(CONFIG_PXLW_IRIS)
@@ -7474,25 +7489,25 @@ int dsi_display_get_modes_helper(struct dsi_display *display,
 
 		memset(&display_mode, 0, sizeof(display_mode));
 
-		display_mode.priv_info = kzalloc(sizeof(*display_mode.priv_info), GFP_KERNEL);
-		if (!display_mode.priv_info) {
-			rc = -ENOMEM;
-			return rc;
-		}
-
-		/* Setup widebus support */
-		display_mode.priv_info->widebus_support = ctrl->ctrl->hw.widebus_support;
-
 		rc = dsi_panel_get_mode(display->panel, mode_idx,
 						&display_mode,
 						topology_override);
 		if (rc) {
 			DSI_ERR("[%s] failed to get mode idx %d from panel\n",
 				   display->name, mode_idx);
-			kfree(display_mode.priv_info);
-			display_mode.priv_info = NULL;
 			rc = -EINVAL;
 			return rc;
+		}
+
+		/*
+		* Update the host_config.dst_format for compressed RGB101010 pixel format.
+		*/
+		if (display->panel->host_config.dst_format == DSI_PIXEL_FORMAT_RGB101010 &&
+				display_mode.timing.dsc_enabled) {
+			display->panel->host_config.dst_format = DSI_PIXEL_FORMAT_RGB888;
+			DSI_DEBUG("updated dst_format from %d to %d\n",
+					DSI_PIXEL_FORMAT_RGB101010,
+					display->panel->host_config.dst_format);
 		}
 
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
@@ -7518,18 +7533,9 @@ int dsi_display_get_modes_helper(struct dsi_display *display,
 		else
 			nondsc_modes++;
 
-		/*
-		 * Update the host_config.dst_format for compressed RGB101010 pixel format
-		 * when there is no widebus support.
-		 */
-		if (host->dst_format == DSI_PIXEL_FORMAT_RGB101010 &&
-				display_mode.timing.dsc_enabled &&
-				!display_mode.priv_info->widebus_support) {
-			host->dst_format = DSI_PIXEL_FORMAT_RGB888;
-			DSI_DEBUG("updated dst_format from %d to %d\n",
-					DSI_PIXEL_FORMAT_RGB101010, host->dst_format);
-		}
-
+		/* Setup widebus support */
+		display_mode.priv_info->widebus_support =
+				ctrl->ctrl->hw.widebus_support;
 		num_dfps_rates = ((!dfps_caps.dfps_support ||
 			!support_video_mode) ? 1 : dfps_caps.dfps_list_len);
 
@@ -8247,6 +8253,12 @@ int dsi_display_set_mode(struct dsi_display *display,
 	oplus_save_last_mode(display);
 #endif /* OPLUS_FEATURE_DISPLAY */
 
+	rc = dsi_display_restore_bit_clk(display, &adj_mode);
+	if (rc) {
+		DSI_ERR("[%s] bit clk rate cannot be restored\n", display->name);
+		goto error;
+	}
+
 	rc = dsi_display_validate_mode_set(display, &adj_mode, flags);
 	if (rc) {
 		DSI_ERR("[%s] mode cannot be set\n", display->name);
@@ -8260,10 +8272,12 @@ int dsi_display_set_mode(struct dsi_display *display,
 	}
 
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
-	DSI_INFO("mdp_transfer_time=%d, hactive=%d, vactive=%d, fps=%d, h_skew=%d, clk_rate=%llu\n",
+	DSI_INFO("mdp_transfer_time=%d, hactive=%d, vactive=%d, fps=%d, h_skew=%d, clk_rate=%llu, h_sync_width=%d,\
+				h_front_porch%d, h_back_porch=%d, v_back_porch=%d, v_sync_width=%d, v_front_porch=%d\n",
 			adj_mode.priv_info->mdp_transfer_time_us,
 			timing.h_active, timing.v_active, timing.refresh_rate, timing.h_skew,
-			adj_mode.priv_info->clk_rate_hz);
+			adj_mode.priv_info->clk_rate_hz, timing.h_sync_width, timing.h_front_porch,
+			timing.h_back_porch, timing.v_back_porch, timing.h_sync_width, timing.v_front_porch);
 #else
 	DSI_INFO("mdp_transfer_time=%d, hactive=%d, vactive=%d, fps=%d, clk_rate=%llu\n",
 			adj_mode.priv_info->mdp_transfer_time_us,
@@ -9210,6 +9224,8 @@ int dsi_display_enable(struct dsi_display *display)
 		}
 #ifdef OPLUS_FEATURE_DISPLAY
 		oplus_display_update_current_display();
+		/* vedio mode first screen fps code download */
+		oplus_panel_switch_vid_mode(display, mode);
 #endif /* OPLUS_FEATURE_DISPLAY */
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
 		oplus_adfr_need_resend_osync_cmd(display, true);

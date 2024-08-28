@@ -287,7 +287,7 @@ struct sde_encoder_irq {
  * @intf_cfg_v1:        Interface hardware configuration to be used if control
  *                      path supports SDE_CTL_ACTIVE_CFG
  * @comp_type:      Type of compression supported
- * @comp_ratio:		Compression ratio multiplied by 100
+ * @comp_ratio:		Compression ratio
  * @dsc_extra_pclk_cycle_cnt: Extra pclk cycle count for DSC over DP
  * @dsc_extra_disp_width: Additional display width for DSC over DP
  * @poms_align_vsync:   poms with vsync aligned
@@ -624,6 +624,7 @@ int sde_encoder_helper_wait_event_timeout(
 
 /*
  * sde_encoder_get_fps - get the allowed panel jitter in nanoseconds
+
  * @frame_rate: custom input frame rate
  * @jitter_num: jitter numerator value
  * @jitter_denom: jitter denomerator value,

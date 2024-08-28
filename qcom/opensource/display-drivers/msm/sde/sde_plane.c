@@ -1204,7 +1204,6 @@ static inline void _sde_plane_setup_csc(struct sde_plane *psde, struct sde_plane
 			pstate->csc_ptr->csc_mv[0],
 			pstate->csc_ptr->csc_mv[1],
 			pstate->csc_ptr->csc_mv[2]);
-
 }
 
 static void sde_color_process_plane_setup(struct drm_plane *plane)
@@ -2963,7 +2962,6 @@ void sde_plane_flush(struct drm_plane *plane)
 	else if (psde->pipe_hw && pstate->csc_ptr && psde->pipe_hw->ops.setup_csc)
 		psde->pipe_hw->ops.setup_csc(psde->pipe_hw, pstate->csc_ptr);
 
-
 	/* flag h/w flush complete */
 	if (plane->state)
 		pstate->pending = false;
@@ -4221,12 +4219,10 @@ static inline void _sde_plane_set_csc_v1(struct sde_plane *psde,
 	for (i = 0; i < SDE_CSC_BIAS_SIZE; ++i) {
 		pstate->csc_cfg.csc_pre_bv[i] = csc_v1.pre_bias[i];
 		pstate->csc_cfg.csc_post_bv[i] = csc_v1.post_bias[i];
-
 	}
 	for (i = 0; i < SDE_CSC_CLAMP_SIZE; ++i) {
 		pstate->csc_cfg.csc_pre_lv[i] = csc_v1.pre_clamp[i];
 		pstate->csc_cfg.csc_post_lv[i] = csc_v1.post_clamp[i];
-
 	}
 	pstate->csc_usr_ptr = &pstate->csc_cfg;
 }
