@@ -5521,10 +5521,6 @@ static int cam_icp_process_generic_cmd_buffer(
 	cmd_desc = (struct cam_cmd_buf_desc *)
 		((uint32_t *) &packet->payload + packet->cmd_buf_offset/4);
 	for (i = 0; i < packet->num_cmd_buf; i++) {
-		rc = cam_packet_util_validate_cmd_desc(&cmd_desc[i]);
-		if (rc)
-			return rc;
-
 		if (!cmd_desc[i].length)
 			continue;
 
@@ -5633,10 +5629,6 @@ static int cam_icp_mgr_config_stream_settings(
 
 	cmd_desc = (struct cam_cmd_buf_desc *)
 		((uint32_t *) &packet->payload + packet->cmd_buf_offset/4);
-
-	rc = cam_packet_util_validate_cmd_desc(cmd_desc);
-	if (rc)
-		return rc;
 
 	if (!cmd_desc[0].length ||
 		cmd_desc[0].meta_data != CAM_ICP_CMD_META_GENERIC_BLOB) {
@@ -6894,11 +6886,45 @@ static void cam_req_mgr_process_workq_icp_timer_queue(struct work_struct *w)
 	cam_req_mgr_process_workq(w);
 }
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+static int cam_icp_mgr_create_wq(bool is_set_UX)
+#else
 static int cam_icp_mgr_create_wq(void)
+#endif
 {
 	int rc;
 	int i;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	int flags = 0;
 
+	if (is_set_UX) {
+		flags = (CAM_WORKQ_FLAG_HIGH_PRIORITY | CAM_WORKQ_FLAG_UX);
+		CAM_INFO(CAM_ICP, "icp workq create flag: CAM_WORKQ_FLAG_HIGH_PRIORITY | CAM_WORKQ_FLAG_UX");
+	}
+	rc = cam_req_mgr_workq_create("icp_command_queue", ICP_WORKQ_NUM_TASK,
+		&icp_hw_mgr.cmd_work, CRM_WORKQ_USAGE_NON_IRQ, flags,
+		cam_req_mgr_process_workq_icp_command_queue);
+	if (rc) {
+		CAM_ERR(CAM_ICP, "unable to create a command worker");
+		goto cmd_work_failed;
+	}
+
+	rc = cam_req_mgr_workq_create("icp_message_queue", ICP_WORKQ_NUM_TASK,
+		&icp_hw_mgr.msg_work, CRM_WORKQ_USAGE_IRQ, flags,
+		cam_req_mgr_process_workq_icp_message_queue);
+	if (rc) {
+		CAM_ERR(CAM_ICP, "unable to create a message worker");
+		goto msg_work_failed;
+	}
+
+	rc = cam_req_mgr_workq_create("icp_timer_queue", ICP_WORKQ_NUM_TASK,
+		&icp_hw_mgr.timer_work, CRM_WORKQ_USAGE_IRQ, flags,
+		cam_req_mgr_process_workq_icp_timer_queue);
+	if (rc) {
+		CAM_ERR(CAM_ICP, "unable to create a timer worker");
+		goto timer_work_failed;
+	}
+#else
 	rc = cam_req_mgr_workq_create("icp_command_queue", ICP_WORKQ_NUM_TASK,
 		&icp_hw_mgr.cmd_work, CRM_WORKQ_USAGE_NON_IRQ, 0,
 		cam_req_mgr_process_workq_icp_command_queue);
@@ -6922,6 +6948,7 @@ static int cam_icp_mgr_create_wq(void)
 		CAM_ERR(CAM_ICP, "unable to create a timer worker");
 		goto timer_work_failed;
 	}
+#endif
 
 	icp_hw_mgr.cmd_work_data =
 		kzalloc(sizeof(struct hfi_cmd_work_data) * ICP_WORKQ_NUM_TASK,
@@ -7056,6 +7083,9 @@ int cam_icp_hw_mgr_init(struct device_node *of_node, uint64_t *hw_mgr_hdl,
 	struct cam_cpas_query_cap query;
 	uint32_t cam_caps, camera_hw_version;
 	uint32_t size = 0;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	bool is_icp_workq_setUX = false;
+#endif
 
 	hw_mgr_intf = (struct cam_hw_mgr_intf *)hw_mgr_hdl;
 	if (!of_node || !hw_mgr_intf) {
@@ -7150,8 +7180,15 @@ int cam_icp_hw_mgr_init(struct device_node *of_node, uint64_t *hw_mgr_hdl,
 		CAM_ERR(CAM_ICP, "get secure mmu handle failed: %d", rc);
 		goto secure_hdl_failed;
 	}
-
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (of_property_read_bool(of_node, "icp-workq-setUX"))
+	{
+		is_icp_workq_setUX = true;
+	}
+	rc = cam_icp_mgr_create_wq(is_icp_workq_setUX);
+#else
 	rc = cam_icp_mgr_create_wq();
+#endif
 	if (rc) {
 		CAM_ERR(CAM_ICP, "cam_icp_mgr_create_wq fail: rc=%d", rc);
 		goto icp_wq_create_failed;

@@ -50,7 +50,6 @@ static ssize_t flash_on_off(struct cam_flash_ctrl *flash_ctrl)
 			flash_data.led_current_ma[0] = 110;
 			flash_data.led_current_ma[1] = 110;
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
-			/*Add by Fangyan @ Camera.Drv 2020/08/18 for different flash current mode*/
 			if (vendor_flash_ctrl->flash_current != 0)
 			{
 				flash_data.led_current_ma[0] = vendor_flash_ctrl->flash_current;
@@ -176,8 +175,12 @@ static DEVICE_ATTR(fswitch, 0660, cam_flash_switch_show,cam_flash_switch_store);
 void oplus_cam_flash_proc_init(struct cam_flash_ctrl *flash_ctl,
     struct platform_device *pdev)
 {
+    int err = 0;
     if (flash_proc_init(flash_ctl) < 0) {
-        device_create_file(&pdev->dev, &dev_attr_fswitch);
+        err = device_create_file(&pdev->dev, &dev_attr_fswitch);
+        if (err){
+          pr_err("device_create_file fail!\n");
+        }
     }
 }
 

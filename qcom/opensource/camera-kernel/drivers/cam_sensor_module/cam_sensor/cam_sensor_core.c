@@ -898,10 +898,6 @@ int32_t cam_handle_mem_ptr(uint64_t handle, uint32_t cmd,
 	CAM_DBG(CAM_SENSOR, "Received Header opcode: %u", probe_ver);
 
 	for (i = 0; i < pkt->num_cmd_buf; i++) {
-		rc = cam_packet_util_validate_cmd_desc(&cmd_desc[i]);
-		if (rc)
-			return rc;
-
 		if (!(cmd_desc[i].length))
 			continue;
 		rc = cam_mem_get_cpu_buf(cmd_desc[i].mem_handle,
@@ -1166,6 +1162,10 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 	}
 
 	mutex_lock(&(s_ctrl->cam_sensor_mutex));
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	pre_cam_sensor_driver_cmd(s_ctrl, arg);
+#endif
+
 	switch (cmd->op_code) {
 	case CAM_SENSOR_PROBE_CMD: {
 		if (s_ctrl->is_probe_succeed == 1) {
@@ -1636,6 +1636,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 #endif
 		rc = cam_sensor_stream_off(s_ctrl);
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
+		rc |= post_cam_sensor_driver_cmd(s_ctrl, arg);
 		trace_end();
 		trace_int(trace, 0);
 #endif
@@ -2039,14 +2040,15 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 	}
 		break;
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
-	case CAM_OEM_GET_ID:
+	case CAM_OEM_GET_ID :
+	case CAM_OEM_IO_CMD :
 	case CAM_GET_DPC_DATA: {
-		rc = oplus_cam_sensor_driver_cmd(s_ctrl, arg);
-		if (rc < 0) {
-			CAM_ERR(CAM_SENSOR, "oplus cmd failed");
-			goto release_mutex;
+			rc = post_cam_sensor_driver_cmd(s_ctrl, arg);
+			if (rc < 0) {
+				CAM_ERR(CAM_SENSOR, "oplus cmd failed");
+				goto release_mutex;
+			}
 		}
-	}
 		break;
 #endif
 	default:

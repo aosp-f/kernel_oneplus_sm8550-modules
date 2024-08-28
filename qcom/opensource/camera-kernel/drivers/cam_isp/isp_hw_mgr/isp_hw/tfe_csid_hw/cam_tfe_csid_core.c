@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/iopoll.h>
@@ -696,14 +696,13 @@ static int cam_tfe_csid_cid_reserve(struct cam_tfe_csid_hw *csid_hw,
 	const struct cam_tfe_csid_reg_offset       *csid_reg;
 
 	CAM_DBG(CAM_ISP,
-		"CSID:%d res_id:0x%x Lane type:%d lane_num:%d dt:%d vc:%d, is_EPD: %d",
+		"CSID:%d res_id:0x%x Lane type:%d lane_num:%d dt:%d vc:%d",
 		csid_hw->hw_intf->hw_idx,
 		cid_reserv->in_port->res_id,
 		cid_reserv->in_port->lane_type,
 		cid_reserv->in_port->lane_num,
 		cid_reserv->in_port->dt[0],
-		cid_reserv->in_port->vc[0],
-		cid_reserv->in_port->epd_supported);
+		cid_reserv->in_port->vc[0]);
 
 	if (cid_reserv->in_port->res_id >= CAM_ISP_TFE_IN_RES_MAX) {
 		CAM_ERR(CAM_ISP, "CSID:%d  Invalid phy sel %d",
@@ -801,8 +800,6 @@ static int cam_tfe_csid_cid_reserve(struct cam_tfe_csid_hw *csid_hw,
 			cid_reserv->in_port->lane_type;
 		csid_hw->csi2_rx_cfg.lane_num =
 			cid_reserv->in_port->lane_num;
-		if (cid_reserv->in_port->epd_supported)
-			csid_hw->csi2_rx_cfg.epd_supported = 1;
 
 		switch (cid_reserv->in_port->res_id) {
 		case CAM_ISP_TFE_IN_RES_TPG:
@@ -1103,10 +1100,6 @@ static int cam_tfe_csid_enable_csi2(
 
 	/* enable packet ecc correction */
 	val |= 1;
-	/* enable epd mode */
-	if (csid_hw->csi2_rx_cfg.epd_supported)
-		val |= (csid_hw->csi2_rx_cfg.epd_supported <<
-			csid_reg->csi2_reg->csi2_rx_epd_mode_shift_en);
 	cam_io_w_mb(val, soc_info->reg_map[0].mem_base +
 		csid_reg->csi2_reg->csid_csi2_rx_cfg1_addr);
 
@@ -1124,10 +1117,6 @@ static int cam_tfe_csid_enable_csi2(
 		TFE_CSID_CSI2_RX_ERROR_STREAM_UNDERFLOW |
 		TFE_CSID_CSI2_RX_ERROR_UNBOUNDED_FRAME |
 		TFE_CSID_CSI2_RX_ERROR_CPHY_PH_CRC;
-
-	if (csid_hw->csi2_rx_cfg.epd_supported &&
-		(csid_hw->csi2_rx_cfg.lane_type == CAM_ISP_LANE_TYPE_DPHY))
-		val &= ~TFE_CSID_CSI2_RX_ERROR_CPHY_EOT_RECEPTION;
 
 	/* Enable the interrupt based on csid debug info set */
 	if (csid_hw->csid_debug & TFE_CSID_DEBUG_ENABLE_SOT_IRQ)
@@ -3686,7 +3675,6 @@ static int cam_tfe_csid_evt_bottom_half_handler(
 	struct cam_isp_hw_event_info event_info;
 	int i;
 	int rc = 0;
-	uint32_t data_idx;
 
 	if (!handler_priv || !evt_payload_priv) {
 		CAM_ERR(CAM_ISP,
@@ -3698,7 +3686,6 @@ static int cam_tfe_csid_evt_bottom_half_handler(
 	csid_hw = (struct cam_tfe_csid_hw *)handler_priv;
 	evt_payload = (struct cam_csid_evt_payload *)evt_payload_priv;
 	csid_reg = csid_hw->csid_info->csid_reg;
-	data_idx = csid_hw->csi2_rx_cfg.phy_sel - 1;
 
 	if (!csid_hw->event_cb || !csid_hw->event_cb_priv) {
 		CAM_ERR_RATE_LIMIT(CAM_ISP,
@@ -3766,16 +3753,14 @@ static int cam_tfe_csid_evt_bottom_half_handler(
 
 	switch (evt_payload->evt_type) {
 	case CAM_ISP_HW_ERROR_CSID_FRAME_SIZE:
-			break;
 	case CAM_ISP_HW_ERROR_CSID_FATAL:
-		/* phy_sel starts from 1 and should never be zero*/
-		if (csid_hw->csi2_rx_cfg.phy_sel > 0) {
-			cam_subdev_notify_message(CAM_CSIPHY_DEVICE_TYPE,
-				CAM_SUBDEV_MESSAGE_REG_DUMP, (void *)&data_idx);
-		}
+		if (csid_hw->fatal_err_detected)
+			break;
 		csid_hw->fatal_err_detected = true;
-		break;
 	case CAM_ISP_HW_ERROR_CSID_OUTPUT_FIFO_OVERFLOW:
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	case CAM_ISP_HW_ERROR_CSID_PKT_PAYLOAD_CORRUPTED:
+#endif
 		event_info.event_data = (void *)&err_evt_info;
 		rc = csid_hw->event_cb(csid_hw->event_cb_priv,
 			CAM_ISP_HW_EVENT_ERROR, (void *)&event_info);
@@ -3954,16 +3939,8 @@ irqreturn_t cam_tfe_csid_irq(int irq_num, void *data)
 		}
 
 		if (irq_status[TFE_CSID_IRQ_REG_RX] &
-			TFE_CSID_CSI2_RX_ERROR_CPHY_EOT_RECEPTION) {
-			if (csid_hw->csi2_rx_cfg.epd_supported)
-				CAM_DBG(CAM_ISP,
-					"CSID[%u] Rcvd Only ERROR_EOT for EPD sensor PHY type: %s(%u)",
-					csid_hw->hw_intf->hw_idx,
-					(csid_hw->csi2_rx_cfg.lane_type) ? "cphy" : "dphy",
-					csid_hw->csi2_rx_cfg.lane_type);
-			else
-				csid_hw->error_irq_count++;
-		}
+			TFE_CSID_CSI2_RX_ERROR_CPHY_EOT_RECEPTION)
+			csid_hw->error_irq_count++;
 
 		if (irq_status[TFE_CSID_IRQ_REG_RX] &
 			TFE_CSID_CSI2_RX_ERROR_CPHY_SOT_RECEPTION)
@@ -3978,8 +3955,15 @@ irqreturn_t cam_tfe_csid_irq(int irq_num, void *data)
 			csid_hw->error_irq_count++;
 
 		if (irq_status[TFE_CSID_IRQ_REG_RX] &
-			TFE_CSID_CSI2_RX_ERROR_CRC)
+			TFE_CSID_CSI2_RX_ERROR_CRC) {
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			csid_hw->error_irq_count++;
+			CAM_INFO_RATE_LIMIT(CAM_ISP, "CSID:%d, Long pkt payload CRC mismatch, error count:%d",
+				csid_hw->hw_intf->hw_idx, csid_hw->error_irq_count);
+#else
 			is_error_irq = true;
+#endif
+		}
 
 		if (irq_status[TFE_CSID_IRQ_REG_RX] &
 			TFE_CSID_CSI2_RX_ERROR_ECC)
@@ -3988,7 +3972,6 @@ irqreturn_t cam_tfe_csid_irq(int irq_num, void *data)
 		if (irq_status[TFE_CSID_IRQ_REG_RX] &
 			TFE_CSID_CSI2_RX_ERROR_MMAPPED_VC_DT)
 			is_error_irq = true;
-
 	}
 handle_fatal_error:
 	spin_unlock_irqrestore(&csid_hw->spin_lock, flags);
@@ -4010,8 +3993,18 @@ handle_fatal_error:
 			csid_reg->csi2_reg->csid_csi2_rx_cfg1_addr);
 		cam_io_w_mb(0, soc_info->reg_map[0].mem_base +
 			csid_reg->csi2_reg->csid_csi2_rx_irq_mask_addr);
-
+		/* phy_sel starts from 1 and should never be zero*/
+		if (csid_hw->csi2_rx_cfg.phy_sel > 0) {
+			cam_subdev_notify_message(CAM_CSIPHY_DEVICE_TYPE,
+				CAM_SUBDEV_MESSAGE_REG_DUMP, (void *)&data_idx);
+		}
 		report_err_type = CAM_ISP_HW_ERROR_CSID_FATAL;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		if (irq_status[TFE_CSID_IRQ_REG_RX] & TFE_CSID_CSI2_RX_ERROR_CRC) {
+			report_err_type = CAM_ISP_HW_ERROR_CSID_PKT_PAYLOAD_CORRUPTED;
+			CAM_ERR(CAM_ISP, "CSID:%d, report_err_type:%d", csid_hw->hw_intf->hw_idx, report_err_type);
+		}
+#endif
 		cam_tfe_csid_handle_hw_err_irq(csid_hw,
 			report_err_type, irq_status);
 	}

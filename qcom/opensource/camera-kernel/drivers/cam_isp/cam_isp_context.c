@@ -1387,7 +1387,7 @@ static void __cam_isp_ctx_send_sof_timestamp(
 
 	if (request_id == 0 && (ctx_isp->reported_frame_id == ctx_isp->frame_id)) {
 		CAM_WARN_RATE_LIMIT(CAM_ISP,
-			"Missed SOF Recovery for invalid req, Skip notificaiton to userspace Ctx: %u frame_id %u",
+			"Missed SOF Recovery for invalid req, Skip notificaiton to userspace Ctx: %u frame_id %llu",
 			ctx->ctx_id, ctx_isp->frame_id);
 		return;
 	}
@@ -1579,6 +1579,7 @@ static int __cam_isp_ctx_handle_buf_done_for_req_list(
 					req_isp->fence_map_out[i].sync_id,
 					CAM_SYNC_STATE_SIGNALED_ERROR,
 					CAM_SYNC_ISP_EVENT_BUBBLE);
+
 			list_add_tail(&req->list, &ctx->free_req_list);
 			CAM_DBG(CAM_REQ,
 				"Move active request %lld to free list(cnt = %d) [flushed], ctx %u",
@@ -2905,9 +2906,7 @@ static int __cam_isp_ctx_sof_in_activated_state(
 	struct cam_context *ctx = ctx_isp->base;
 	uint64_t request_id = 0;
 
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
 	ctx_isp->last_sof_jiffies = jiffies;
-#endif
 
 	/* First check if there is a valid request in active list */
 	list_for_each_entry(req, &ctx->active_req_list, list) {
@@ -2986,9 +2985,7 @@ static int __cam_isp_ctx_epoch_in_applied(struct cam_isp_context *ctx_isp,
 	void *evt_data)
 {
 	uint64_t request_id = 0;
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
 	uint32_t wait_req_cnt = 0;
-#endif
 	uint32_t sof_event_status = CAM_REQ_MGR_SOF_EVENT_SUCCESS;
 	struct cam_ctx_request             *req;
 	struct cam_isp_ctx_req             *req_isp;
@@ -3018,7 +3015,6 @@ static int __cam_isp_ctx_epoch_in_applied(struct cam_isp_context *ctx_isp,
 		goto end;
 	}
 
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
 	if (ctx_isp->last_applied_jiffies >= ctx_isp->last_sof_jiffies) {
 		list_for_each_entry(req, &ctx->wait_req_list, list) {
 			wait_req_cnt++;
@@ -3038,7 +3034,6 @@ static int __cam_isp_ctx_epoch_in_applied(struct cam_isp_context *ctx_isp,
 			goto end;
 		}
 	}
-#endif
 
 	/* Update state prior to notifying CRM */
 	ctx_isp->substate_activated = CAM_ISP_CTX_ACTIVATED_BUBBLE;
@@ -3173,9 +3168,7 @@ static int __cam_isp_ctx_sof_in_epoch(struct cam_isp_context *ctx_isp,
 		return -EINVAL;
 	}
 
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
 	ctx_isp->last_sof_jiffies = jiffies;
-#endif
 
 	if (atomic_read(&ctx_isp->apply_in_progress))
 		CAM_INFO(CAM_ISP, "Apply is in progress at the time of SOF");
@@ -4628,9 +4621,7 @@ static int __cam_isp_ctx_apply_req_in_activated_state(
 		spin_lock_bh(&ctx->lock);
 		ctx_isp->substate_activated = next_state;
 		ctx_isp->last_applied_req_id = apply->request_id;
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
 		ctx_isp->last_applied_jiffies = jiffies;
-#endif
 
 		if (ctx_isp->is_tfe_shdr) {
 			if (ctx_isp->is_shdr_master && req_isp->hw_update_data.mup_en)
@@ -5057,7 +5048,7 @@ static int __cam_isp_ctx_dump_in_top_state(
 	}
 	goto end;
 hw_dump:
-	rc  = cam_mem_get_cpu_buf(dump_info->buf_handle,
+	rc = cam_mem_get_cpu_buf(dump_info->buf_handle,
 		&cpu_addr, &buf_len);
 	if (rc) {
 		CAM_ERR(CAM_ISP, "Invalid handle %u rc %d",
@@ -7346,10 +7337,8 @@ static inline void __cam_isp_context_reset_ctx_params(
 	ctx_isp->recovery_req_id = 0;
 	ctx_isp->aeb_error_cnt = 0;
 	ctx_isp->out_of_sync_cnt = 0;
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
 	ctx_isp->last_sof_jiffies = 0;
 	ctx_isp->last_applied_jiffies = 0;
-#endif
 }
 
 static int __cam_isp_ctx_start_dev_in_ready(struct cam_context *ctx,

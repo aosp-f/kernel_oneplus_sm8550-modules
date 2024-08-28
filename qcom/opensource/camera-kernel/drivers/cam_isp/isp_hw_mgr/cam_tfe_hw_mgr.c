@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/slab.h>
@@ -39,9 +39,6 @@
 #define CAM_TFE_SAFE_DISABLE 0
 #define CAM_TFE_SAFE_ENABLE 1
 #define SMMU_SE_TFE 0
-
-#define CAM_TFE_HW_MGR_STATE_INACTIVE  0
-#define CAM_TFE_HW_MGR_STATE_ACTIVE    1
 
 static struct cam_tfe_hw_mgr g_tfe_hw_mgr;
 static uint32_t g_num_tfe_available, g_num_tfe_functional;
@@ -2149,8 +2146,6 @@ static int cam_tfe_mgr_acquire_get_unified_structure_v2(
 					CAM_ISP_TFE_FLAG_SHDR_SLAVE_EN;
 	in_port->is_shdr_master  =  in->feature_flag &
 					CAM_ISP_TFE_FLAG_SHDR_MASTER_EN;
-	in_port->epd_supported  =  in->feature_flag &
-					CAM_ISP_TFE_FLAG_EPD_SUPPORT;
 
 
 	if (in_port->bayer_bin && in_port->qcfa_bin) {
@@ -2976,7 +2971,6 @@ static int cam_tfe_mgr_config_hw(void *hw_mgr_priv,
 	struct cam_tfe_hw_mgr_ctx *ctx;
 	struct cam_isp_prepare_hw_update_data *hw_update_data;
 	bool is_cdm_hung = false;
-	unsigned long rem_jiffies = 0;
 
 	if (!hw_mgr_priv || !config_hw_args) {
 		CAM_ERR(CAM_ISP, "Invalid arguments");
@@ -3157,13 +3151,12 @@ static int cam_tfe_mgr_config_hw(void *hw_mgr_priv,
 		goto end;
 
 	for (i = 0; i < CAM_TFE_HW_CONFIG_WAIT_MAX_TRY; i++) {
-		rem_jiffies = cam_common_wait_for_completion_timeout(
+		rc = cam_common_wait_for_completion_timeout(
 			&ctx->config_done_complete,
 			msecs_to_jiffies(
 			CAM_TFE_HW_CONFIG_TIMEOUT));
-		if (rem_jiffies <= 0) {
-			rc = cam_cdm_detect_hang_error(ctx->cdm_handle);
-			if (rc == 0) {
+		if (rc <= 0) {
+			if (!cam_cdm_detect_hang_error(ctx->cdm_handle)) {
 				CAM_ERR(CAM_ISP,
 					"CDM workqueue delay detected, wait for some more time req_id=%llu rc=%d ctx_index %d",
 					cfg->request_id, rc,
@@ -3175,21 +3168,24 @@ static int cam_tfe_mgr_config_hw(void *hw_mgr_priv,
 					CAM_DEFAULT_VALUE,
 					CAM_DEFAULT_VALUE, rc);
 				continue;
-			} else {
-				CAM_ERR(CAM_ISP,
-					"cfg_done completn timeout cdm_hang=%d req=%llu ctx_idx=%d",
-					true, cfg->request_id,
-					ctx->ctx_index);
-				cam_req_mgr_debug_delay_detect();
-				trace_cam_delay_detect("ISP",
-					"config done completion timeout",
-					cfg->request_id, ctx->ctx_index,
-					CAM_DEFAULT_VALUE, CAM_DEFAULT_VALUE,
-					rc);
-
-				rc = -ETIMEDOUT;
-				break;
 			}
+
+			CAM_ERR(CAM_ISP,
+				"config done completion timeout for req_id=%llu rc=%d ctx_index %d",
+				cfg->request_id, rc,
+				ctx->ctx_index);
+
+			cam_req_mgr_debug_delay_detect();
+			trace_cam_delay_detect("ISP",
+				"config done completion timeout",
+				cfg->request_id, ctx->ctx_index,
+				CAM_DEFAULT_VALUE, CAM_DEFAULT_VALUE,
+				rc);
+
+			if (rc == 0)
+				rc = -ETIMEDOUT;
+
+			goto end;
 		} else {
 			rc = 0;
 			if (hw_update_data->mup_en)
@@ -3202,7 +3198,7 @@ static int cam_tfe_mgr_config_hw(void *hw_mgr_priv,
 	}
 
 	if ((i == CAM_TFE_HW_CONFIG_WAIT_MAX_TRY) && (rc == 0))
-		CAM_DBG(CAM_ISP, "Wq delayed but IRQ CDM done");
+		rc = -ETIMEDOUT;
 
 end:
 	CAM_DBG(CAM_ISP, "Exit: Config Done: %llu",  cfg->request_id);
@@ -3247,7 +3243,6 @@ static int cam_tfe_mgr_stop_hw_in_overflow(void *stop_hw_args)
 	if (i == ctx->num_base)
 		master_base_idx = ctx->base[0].idx;
 
-	ctx->ctx_state = CAM_TFE_HW_MGR_STATE_INACTIVE;
 
 	/* stop the master CSID path first */
 	cam_tfe_mgr_csid_stop_hw(ctx, &ctx->res_list_tfe_csid,
@@ -3375,8 +3370,6 @@ static int cam_tfe_mgr_stop_hw(void *hw_mgr_priv, void *stop_hw_args)
 	 */
 	if (i == ctx->num_base)
 		master_base_idx = ctx->base[0].idx;
-
-	ctx->ctx_state = CAM_TFE_HW_MGR_STATE_INACTIVE;
 
 	/*Change slave mode*/
 	if (csid_halt_type == CAM_TFE_CSID_HALT_IMMEDIATELY)
@@ -3538,8 +3531,6 @@ static int cam_tfe_mgr_restart_hw(void *start_hw_args)
 			goto err;
 		}
 	}
-
-	ctx->ctx_state = CAM_TFE_HW_MGR_STATE_ACTIVE;
 
 	CAM_DBG(CAM_ISP, "Exit...(success)");
 	return 0;
@@ -3744,7 +3735,6 @@ start_only:
 		}
 	}
 
-	ctx->ctx_state = CAM_TFE_HW_MGR_STATE_ACTIVE;
 	ctx->last_dump_flush_req_id = U64_MAX;
 	ctx->last_dump_err_req_id = U64_MAX;
 	return 0;
@@ -4160,7 +4150,7 @@ static int cam_isp_tfe_blob_update_out_resource_config(
 
 		hw_mgr_res = &ctx->res_list_tfe_out[res_id_out];
 
-		rc = cam_isp_add_cmd_buf_update(
+	    rc = cam_isp_add_cmd_buf_update_crow(
 			hw_mgr_res, blob_type,
 			CAM_ISP_HW_CMD_WM_CONFIG_UPDATE,
 			blob_info->base_info->idx,
@@ -4254,7 +4244,7 @@ static int cam_isp_tfe_blob_hfr_update(
 			total_used_bytes/4;
 		hw_mgr_res = &ctx->res_list_tfe_out[res_id_out];
 
-		rc = cam_isp_add_cmd_buf_update(
+		rc = cam_isp_add_cmd_buf_update_crow(
 			hw_mgr_res, blob_type, CAM_ISP_HW_CMD_GET_HFR_UPDATE,
 			blob_info->base_info->idx,
 			(void *)cmd_buf_addr,
@@ -4513,7 +4503,7 @@ static int cam_isp_tfe_blob_bw_limit_update(
 
 		hw_mgr_res = &ctx->res_list_tfe_out[res_id_out];
 
-		rc = cam_isp_add_cmd_buf_update(
+		rc = cam_isp_add_cmd_buf_update_crow(
 			hw_mgr_res, blob_type,
 			CAM_ISP_HW_CMD_WM_BW_LIMIT_CONFIG,
 			blob_info->base_info->idx,
@@ -4521,6 +4511,7 @@ static int cam_isp_tfe_blob_bw_limit_update(
 			kmd_buf_remain_size,
 			(void *)wm_bw_limit_cfg,
 			&bytes_used);
+
 		if (rc < 0) {
 			CAM_ERR(CAM_ISP,
 				"Failed to update %s BW limiter config for res:0x%x enable:%d [0x%x:0x%x] base_idx:%d bytes_used:%u rc:%d",
@@ -4641,6 +4632,35 @@ static int cam_isp_tfe_blob_csid_discard_init_frame_update(
 
 	return rc;
 }
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+static int cam_isp_tfe_blob_update_epoch_factor(struct cam_isp_generic_blob_info *blob_info, uint8_t epoch_factor, struct cam_hw_prepare_update_args *prepare)
+{
+	struct cam_hw_intf *hw_if = NULL;
+	struct cam_isp_resource_node *res = NULL;
+	int i;
+
+	for (i = 0; i < CAM_TFE_HW_NUM_MAX; i++) {
+		if (!g_tfe_hw_mgr.tfe_devices[i]) {
+			continue;
+		}
+		hw_if = g_tfe_hw_mgr.tfe_devices[i]->hw_intf;
+		if (!hw_if) {
+			CAM_ERR_RATE_LIMIT(CAM_ISP, "hw_intf is null");
+			return -EINVAL;
+		}
+		if (hw_if->hw_ops.process_cmd) {
+			CAM_INFO(CAM_ISP, "updating epoch factor %d cfg for res: %s on CSID[%u]", epoch_factor,
+					res->res_name, blob_info->base_info->idx);
+			hw_if->hw_ops.process_cmd(hw_if->hw_priv,
+				CAM_ISP_HW_CMD_EPOCH_FACTOR_UPDATE,
+				&epoch_factor,
+				sizeof(uint8_t));
+		}
+	}
+
+	return 0;
+}
+#endif
 
 static int cam_isp_tfe_packet_generic_blob_handler(void *user_data,
 	uint32_t blob_type, uint32_t blob_size, uint8_t *blob_data)
@@ -5029,6 +5049,18 @@ static int cam_isp_tfe_packet_generic_blob_handler(void *user_data,
 				rc, prepare->packet->header.request_id);
 	}
 		break;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	case CAM_ISP_TFE_GENERIC_BLOB_TYPE_UPDATE_EPOCH_FACTOR: {
+		uint8_t* epoch_factor = (uint8_t *)blob_data;
+
+		if ((*epoch_factor <= 0) && ((*epoch_factor > 100))) {
+			CAM_ERR(CAM_ISP, "epoch factor %d out of range [1, 100]", *epoch_factor);
+			return -EINVAL;
+		}
+		cam_isp_tfe_blob_update_epoch_factor(blob_info, *epoch_factor, prepare);
+	}
+		break;
+#endif
 	default:
 		CAM_WARN(CAM_ISP, "Invalid blob type %d ctx %d", blob_type,
 			tfe_mgr_ctx->ctx_index);
@@ -5409,14 +5441,14 @@ static int cam_tfe_mgr_prepare_hw_update(void *hw_mgr_priv,
 		prepare_hw_data->wm_bitmask = ctx->acquired_wm_mask;
 
 		/* get IO buffers */
-		rc = cam_isp_add_io_buffers(hw_mgr->mgr_common.img_iommu_hdl,
-			hw_mgr->mgr_common.img_iommu_hdl_secure,
-			prepare, ctx->base[i].idx,
-			&prepare_hw_data->kmd_cmd_buff_info, ctx->res_list_tfe_out,
-			NULL, CAM_ISP_TFE_OUT_RES_BASE,
-			CAM_TFE_HW_OUT_RES_MAX, fill_fence,
-			CAM_ISP_HW_TYPE_TFE,
-			&frame_header_info, &check_for_scratch);
+		rc = cam_isp_add_io_buffers_crow(hw_mgr->mgr_common.img_iommu_hdl,
+				hw_mgr->mgr_common.img_iommu_hdl_secure,
+				prepare, ctx->base[i].idx,
+				&prepare_hw_data->kmd_cmd_buff_info, ctx->res_list_tfe_out,
+				NULL, CAM_ISP_TFE_OUT_RES_BASE,
+				CAM_TFE_HW_OUT_RES_MAX, fill_fence,
+				CAM_ISP_HW_TYPE_TFE,
+				&frame_header_info, &check_for_scratch);
 
 		if (rc) {
 			CAM_ERR(CAM_ISP,
@@ -5697,8 +5729,7 @@ static void cam_tfe_mgr_dump_pf_data(
 
 	pf_cmd_args = hw_cmd_args->u.pf_cmd_args;
 	rc = cam_packet_util_get_packet_addr(&packet,
-		pf_cmd_args->pf_req_info->packet_handle,
-		pf_cmd_args->pf_req_info->packet_offset);
+		pf_cmd_args->pf_req_info->packet_handle, pf_cmd_args->pf_req_info->packet_offset);
 	if (rc)
 		return;
 	ctx_found = &pf_cmd_args->pf_args->pf_context_info.ctx_found;
@@ -6560,6 +6591,13 @@ static int cam_tfe_hw_mgr_handle_csid_event(
 		}
 		break;
 	}
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	case CAM_ISP_HW_ERROR_CSID_PKT_PAYLOAD_CORRUPTED: {
+		error_event_data.error_type = CAM_ISP_HW_ERROR_CSID_PKT_PAYLOAD_CORRUPTED;
+		recovery_data.error_type = CAM_ISP_HW_ERROR_CSID_PKT_PAYLOAD_CORRUPTED;
+		break;
+	}
+#endif
 	default:
 		CAM_ERR(CAM_ISP, "CSID:%d, unahandled error: %d",
 			event_info->hw_idx, err_type);
@@ -6593,12 +6631,6 @@ static int cam_tfe_hw_mgr_handle_hw_err(
 		tfe_hw_mgr_ctx = (struct cam_tfe_hw_mgr_ctx *)ctx;
 	else {
 		CAM_ERR(CAM_ISP, "tfe hw mgr ctx NULL");
-		return rc;
-	}
-
-	if (!tfe_hw_mgr_ctx->ctx_state) {
-		CAM_INFO(CAM_ISP, "TFE Hw mgr ctx is not in active state ctx %d",
-			tfe_hw_mgr_ctx->ctx_index);
 		return rc;
 	}
 
